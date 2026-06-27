@@ -1,0 +1,9 @@
+LIBRARY kernel32.dll
+EXPORTS
+    GetCommandLineW
+    GetStdHandle
+    GetLastError
+    ExitProcess
+    lstrcpynW
+    lstrcmpiW
+    WriteFile

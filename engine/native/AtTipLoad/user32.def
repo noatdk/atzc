@@ -1,0 +1,24 @@
+LIBRARY user32.dll
+EXPORTS
+    AllowSetForegroundWindow
+    AttachThreadInput
+    CreateWindowExW
+    DefWindowProcW
+    DispatchMessageW
+    GetForegroundWindow
+    GetWindowThreadProcessId
+    LoadKeyboardLayoutW
+    PeekMessageW
+    PostMessageW
+    PostQuitMessage
+    RegisterClassW
+    SetFocus
+    SetForegroundWindow
+    ActivateKeyboardLayout
+    SetRectEmpty
+    ShowWindow
+    SendInput
+    SendMessageW
+    TranslateMessage
+    wsprintfA
+    wsprintfW

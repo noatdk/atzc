@@ -1,0 +1,9 @@
+LIBRARY kernel32.dll
+EXPORTS
+  CloseHandle
+  GetStdHandle
+  OpenFileMappingW
+  OpenMutexW
+  WideCharToMultiByte
+  WriteFile
+  lstrlenA

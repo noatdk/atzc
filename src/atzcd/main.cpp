@@ -108,8 +108,8 @@ void serve_conn(int cfd, atzc::Session &session) {
 
 [[noreturn]] void usage(const char *argv0, int code) {
   std::fprintf(code ? stderr : stdout,
-               "usage: %s --engine-dir <path> [--socket <path>] [--type-delay-ms N]\n"
-               "  --engine-dir    path to the engine directory (contains the launcher)\n"
+               "usage: %s [--engine-dir <path>] [--socket <path>] [--type-delay-ms N]\n"
+               "  --engine-dir    harness dir (scripts + native); default: bundled engine/\n"
                "  --socket        unix socket path (default: %s)\n"
                "  --type-delay-ms per-keystroke typing delay (0 = none)\n",
                argv0, atzc::default_socket_path().c_str());
@@ -138,8 +138,12 @@ int main(int argc, char **argv) {
     }
   }
   if (engine_dir.empty()) {
+#ifdef ATZC_ENGINE_DIR
+    engine_dir = ATZC_ENGINE_DIR;  // bundled engine/ (scripts + native)
+#else
     std::fprintf(stderr, "atzcd: --engine-dir is required\n");
     usage(argv[0], 2);
+#endif
   }
   if (socket_path.empty()) socket_path = atzc::default_socket_path();
   g_socket_path = socket_path;

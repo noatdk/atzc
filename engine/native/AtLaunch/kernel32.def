@@ -1,0 +1,20 @@
+LIBRARY kernel32.dll
+EXPORTS
+  CloseHandle
+  CreateProcessW
+  CreateRemoteThread
+  ExitProcess
+  GetCommandLineW
+  GetExitCodeThread
+  GetLastError
+  GetModuleHandleW
+  GetProcAddress
+  GetStdHandle
+  ResumeThread
+  SetHandleInformation
+  TerminateProcess
+  VirtualAllocEx
+  WaitForSingleObject
+  WriteFile
+  WriteProcessMemory
+  lstrlenW

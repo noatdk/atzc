@@ -1,0 +1,7 @@
+LIBRARY Atok31De.dll
+EXPORTS
+    ord5 @5 NONAME
+    ord6 @6 NONAME
+    ord7 @7 NONAME
+    ord8 @8 NONAME
+    ord9 @9 NONAME

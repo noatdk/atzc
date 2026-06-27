@@ -1,0 +1,4 @@
+LIBRARY msctf.dll
+EXPORTS
+    TF_CreateThreadMgr
+    TF_CreateInputProcessorProfiles

@@ -1,0 +1,6 @@
+LIBRARY imm32.dll
+EXPORTS
+    ImmGetContext
+    ImmReleaseContext
+    ImmGetOpenStatus
+    ImmGetConversionStatus

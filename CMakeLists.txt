@@ -24,15 +24,22 @@ add_library(atzc-core STATIC
 target_include_directories(atzc-core PUBLIC include)
 target_link_libraries(atzc-core PUBLIC Threads::Threads)
 
-# libatzcclient — the socket client, shared by atzc, the fcitx5 addon, and
-# (out of tree) modore's AtzcBackend. Implements the same atzc::Converter
-# contract as LocalConverter.
-add_library(atzcclient STATIC src/client.cpp)
+# libatzcclient — the socket client + the POSIX MakeConverter (a reconnecting
+# client). Shared by atzc, the fcitx5 addon, and (out of tree) modore's Linux
+# AtzcBackend. Implements the same atzc::Converter contract as LocalConverter.
+add_library(atzcclient STATIC src/client.cpp src/frontend_posix.cpp)
 target_include_directories(atzcclient PUBLIC include)
 
-# atzcd — the relay daemon = atzc-core + a Unix-socket server.
+# atzcd — the relay daemon = atzc-core + a Unix-socket server. The Wine harness
+# it drives is bundled in engine/ (scripts + native); ATZC_ENGINE_DIR points
+# atzcd at it so a source build is self-contained (no --engine-dir, no external
+# tree). A release/installed build overrides this to the packaged engine path.
+# The harvested engine install + Wine stay user-provided (engine/.atzc, or
+# AT_HOME).
 add_executable(atzcd src/atzcd/main.cpp)
 target_include_directories(atzcd PRIVATE include src)
+target_compile_definitions(atzcd PRIVATE
+  ATZC_ENGINE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/engine")
 target_link_libraries(atzcd PRIVATE atzc-core atzcclient Threads::Threads)
 
 # atzc — test/diagnostic client.

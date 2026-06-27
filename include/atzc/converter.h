@@ -43,7 +43,7 @@ struct ConverterConfig {
 // lazy-connects / lazy-starts on the first call and recovers once from a
 // dropped connection or dead engine):
 //   - POSIX:   a reconnecting client to atzcd.
-//   - Windows: an in-process engine driving the installed ATOK.
+//   - Windows: an in-process engine driving the installed IME.
 // Not thread-safe — serialize calls on the returned Converter (the engine is
 // serial anyway). Defined per platform (frontend_posix.cpp / frontend_windows.cpp).
 std::unique_ptr<Converter> MakeConverter(const ConverterConfig &config = {});

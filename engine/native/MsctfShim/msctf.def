@@ -1,0 +1,7 @@
+LIBRARY msctf.dll
+EXPORTS
+    TF_CreateThreadMgr=TF_CreateThreadMgr@4
+    TF_CreateInputProcessorProfiles=TF_CreateInputProcessorProfiles@4
+    TF_CreateLangBarItemMgr=TF_CreateLangBarItemMgr@4
+    DllGetClassObject=DllGetClassObject@12
+    DllCanUnloadNow=DllCanUnloadNow@0

@@ -1,0 +1,9 @@
+LIBRARY user32.dll
+EXPORTS
+    FindWindowW
+    GetClassNameW
+    GetWindowTextW
+    GetWindowThreadProcessId
+    EnumWindows
+    SendMessageW
+    wsprintfA

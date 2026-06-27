@@ -1,0 +1,11 @@
+LIBRARY imm32.dll
+EXPORTS
+    ImmGetCompositionStringW
+    ImmGetCandidateListW
+    ImmGetCandidateListCountW
+    ImmGetContext
+    ImmGetOpenStatus
+    ImmGetConversionStatus
+    ImmReleaseContext
+    ImmSetOpenStatus
+    ImmSetConversionStatus

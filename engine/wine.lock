@@ -1,0 +1,14 @@
+# Pinned Wine build — fetched, never vendored.
+#
+# scripts/fetch-wine.sh downloads this exact package, verifies the sha256, and
+# extracts it into .wine-pin/ (no root). One Arch package carries everything the
+# build and runtime need: the loader, the builtin PE DLLs (incl. i386 msctf), and
+# the wine/windows SDK headers. We redistribute nothing — only this pointer.
+#
+# This is the validated combination (stock mainline Wine, no staging, no patches;
+# the engine's only fix is its own in-process guard). To repin: change all three
+# fields together (get the sha256 with `sha256sum` on the downloaded package).
+
+WINE_PKG_VERSION=11.5-1
+WINE_PKG_URL=https://archive.archlinux.org/packages/w/wine/wine-11.5-1-x86_64.pkg.tar.zst
+WINE_PKG_SHA256=4132f2e9a677025a6675e175c6fb7e577240004519d065f4ca74e93bbd706990

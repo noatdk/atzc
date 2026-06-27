@@ -2,3 +2,16 @@
 *.o
 *.a
 compile_commands.json
+
+# engine/ — bundled Wine harness. Source + build scripts are tracked; the
+# cross-compiled PE outputs and the BYO inputs are not.
+/engine/native/**/build/
+/engine/native/**/*.exe
+/engine/native/**/*.dll
+/engine/native/MsctfShim/msctf-helper.dll
+# BYO, license-specific: harvested engine install, Wine prefix/runtime, and the
+# real-Windows registry captures (needed for the full candidate list).
+/engine/.atzc/
+/engine/.wine*
+/engine/recon/captures/
+/engine/tipruntime.log

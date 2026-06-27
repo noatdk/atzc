@@ -1,0 +1,8 @@
+LIBRARY user32.dll
+EXPORTS
+    FindWindowW
+    FindWindowExW
+    EnumWindows
+    GetClassNameW
+    GetWindowTextW
+    RegisterWindowMessageW
