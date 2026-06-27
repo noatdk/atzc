@@ -19,9 +19,9 @@
 #include <string>
 
 #include "atzc/client.h"  // default_socket_path()
+#include "atzc/harness_engine.h"
 #include "atzc/proto.h"
-#include "atzcd/harness_engine.h"
-#include "atzcd/session.h"
+#include "atzc/session.h"
 
 namespace {
 
@@ -149,7 +149,8 @@ int main(int argc, char **argv) {
   signal(SIGTERM, cleanup_and_exit);
 
   // Bring the engine up first; no point opening the socket if it fails.
-  atzc::HarnessEngine engine(engine_dir, type_delay_ms);
+  atzc::HarnessEngine engine(
+      atzc::MakeHarnessProcess(engine_dir, type_delay_ms));
   std::fprintf(stderr, "atzcd: starting engine (cold bring-up can take minutes)...\n");
   if (std::string err; !engine.start(&err)) {
     std::fprintf(stderr, "atzcd: engine failed to start: %s\n", err.c_str());

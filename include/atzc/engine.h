@@ -2,8 +2,8 @@
 // (HarnessEngine, which drives the Wine-hosted TSF harness over stdio); the
 // interface keeps the socket server and the engine transport decoupled.
 
-#ifndef ATZCD_ENGINE_H_
-#define ATZCD_ENGINE_H_
+#ifndef ATZC_ENGINE_H_
+#define ATZC_ENGINE_H_
 
 #include <string>
 
@@ -35,4 +35,4 @@ class Engine {
 
 }  // namespace atzc
 
-#endif  // ATZCD_ENGINE_H_
+#endif  // ATZC_ENGINE_H_

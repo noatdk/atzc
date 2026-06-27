@@ -11,8 +11,8 @@
 // fast (~0.08 s) while the slower full list is computed off the client's critical
 // path and ready when needed.
 
-#ifndef ATZCD_SESSION_H_
-#define ATZCD_SESSION_H_
+#ifndef ATZC_SESSION_H_
+#define ATZC_SESSION_H_
 
 #include <atomic>
 #include <condition_variable>
@@ -77,4 +77,4 @@ class Session {
 
 }  // namespace atzc
 
-#endif  // ATZCD_SESSION_H_
+#endif  // ATZC_SESSION_H_
