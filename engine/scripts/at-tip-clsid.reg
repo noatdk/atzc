@@ -1,0 +1,17 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Classes\CLSID\{1314EB53-CACA-4152-A556-A184143202AF}\InprocServer32]
+@="C:\\Program Files\\JustSystems\\ATOK31T29\\ATOK31TIP.DLL"
+"ThreadingModel"="Apartment"
+
+[HKEY_CURRENT_USER\Software\Classes\Wow6432Node\CLSID\{1314EB53-CACA-4152-A556-A184143202AF}\InprocServer32]
+@="C:\\Program Files\\JustSystems\\ATOK31T29\\ATOK31TIP.DLL"
+"ThreadingModel"="Apartment"
+
+[HKEY_LOCAL_MACHINE\Software\Classes\CLSID\{1314EB53-CACA-4152-A556-A184143202AF}\InprocServer32]
+@="C:\\Program Files\\JustSystems\\ATOK31T29\\ATOK31TIP.DLL"
+"ThreadingModel"="Apartment"
+
+[HKEY_LOCAL_MACHINE\Software\Classes\Wow6432Node\CLSID\{1314EB53-CACA-4152-A556-A184143202AF}\InprocServer32]
+@="C:\\Program Files\\JustSystems\\ATOK31T29\\ATOK31TIP.DLL"
+"ThreadingModel"="Apartment"
