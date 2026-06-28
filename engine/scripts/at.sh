@@ -51,6 +51,7 @@ Short commands:
   tipreg             Register ATOK31TIP.DLL with regsvr32.
   nsshim             Build the Wine private-namespace shim DLL.
   build              Build runtime components + AtCtl, no launch (warm-loop prep).
+  tipload            Force-load the ATOK TIP COM server (CoCreateInstance).
   tipruntime         Launch AtTipLoad in persistent runtime mode.
   daemon-up          One-time relay bring-up: prefix + build + warm servers
                      (no TIP). For ../atzc-server. Run once.
@@ -62,36 +63,10 @@ Short commands:
   tmexsnap [pid]     Send the `tmexsnap` runtime command through the resident TipLoad window.
   tmex [pid]         Send the TMEx state-dump probe through the resident TipLoad window.
   manualtipsnap [pid] Send the `manualtipsnap` runtime command through the resident TipLoad window.
-  tipsnapshot        Launch AtTipLoad in one-shot snapshot mode, exit after logging the startup snapshot, and save recon/captures/tipruntime-snapshot-latest.log.
+  tipsnapshot        Launch AtTipLoad in one-shot snapshot mode, exit after logging the startup snapshot.
   scan               Register the TIP DLL, then dump filtered CTF/CLSID keys.
-  trace [target...]  Trace the default launcher or a selected target.
-  ipc [target...]    Trace server objects plus window/message traffic.
-  traceall           Trace ATOK31MN.EXE, ATFSVR31.EXE, and JSFLT.exe.
-  traceibdv          Trace ATOK31IB.EXE and ATOK31DV.EXE startup around missing IPC objects.
-  traceallcmp        Compare the latest ATOK31MN.EXE and ATFSVR31.EXE trace markers.
-  traceallobj        Compare the latest ATOK31MN.EXE and ATFSVR31.EXE object markers.
-  traceallnames      Compare the latest trace bundle against the Windows endpoint-name set and boundary-setup markers (set AT_TRACE_REUSE=1 to skip a fresh Wine run and inspect the newest saved bundle; the summary is saved under recon/captures/traceallnames-latest.txt).
-  tracealldelta      Compare the saved traceallnames summary against the documented Windows IPC names and write recon/captures/traceallnames-delta-latest.txt.
-  tracejsflt         Trace JSFLT.exe setup/setupapi behavior from install tree.
-  tracejsfltboot     Trace JSFLT.exe from a fresh prefix bootstrap (set AT_BOOTSTRAP_WINE=0 to skip pre-warming).
-  tracejsfltraw      Trace JSFLT.exe from a fresh prefix without pre-warming.
-  tracejsfltdiff     Compare the bootstrapped and raw JSFLT service-boundary markers.
-  tracejsfltcmp      Trace JSFLT.exe in shared and fresh prefixes.
   probe              Find the TIP window and print ATOK registered messages.
-  tipload            Force-load the ATOK TIP COM server (CoCreateInstance).
-  shmdump [args...]  Probe known ATOK shared-memory mappings.
-  target [mode...]   Build and launch a simple input target window.
-  ctl <command...>   Send a runtime control command to the target window.
-  traceapp [mode...]  Trace the input target window under Wine.
-                     Modes include `nativejp`, `commitjp`, and
-                     `postkonnichiha-openjp`.
-                     `stubreconv` seeds text and answers IME reconversion
-                     and document-feed requests from the client side.
-                     `selftestreconv` exercises the reconversion request
-                     path without host-side key injection.
-  msg <name>         Send a registered message to ATOK31TRAYMANAGER.
-  msgtrace <name> [wparam] [lparam]
-                     Trace the registered message sender while it talks to ATOK31TRAYMANAGER.
+  ctl <command...>   Send a runtime control command to the resident TipLoad window.
   shell [exe...]     Start explorer.exe on a Wine desktop, optionally launch ATOK.
   setup              Create the prefix and import the registry.
 
@@ -140,12 +115,6 @@ resolve_bundle_file() {
   done
 
   return 1
-}
-
-kill_existing_target() {
-  ensure_layout
-  run_wine cmd.exe /c taskkill /IM AtTarget.exe /F >/dev/null 2>&1 || true
-  run_wine cmd.exe /c taskkill /IM atoktarget.exe /F >/dev/null 2>&1 || true
 }
 
 kill_existing_tipruntime() {
@@ -448,48 +417,10 @@ EOF
   return "$rc"
 }
 
-run_shmdump() {
-  ensure_layout
-  bash "$HERE/build-at-shmdump.sh"
-  run_wine "$PWD/native/AtShmDump/AtShmDump64.exe" "$@"
-}
-
-run_target() {
-  ensure_layout
-  kill_existing_target
-  bash "$HERE/build-at-target.sh"
-  run_wine "$PWD/native/AtTarget/AtTarget.exe" "$@"
-}
-
 run_ctl() {
   ensure_layout
   bash "$HERE/build-at-ctl.sh"
   run_wine "$PWD/native/AtCtl/AtCtl.exe" "$@"
-}
-
-send_msg() {
-  ensure_layout
-  bash "$HERE/build-at-msg.sh"
-  run_wine "$PWD/native/AtMsg/AtMsg.exe" "${1:-IncrementTip}"
-}
-
-trace_msg() {
-  ensure_layout
-  bash "$HERE/build-at-msg.sh"
-  local timeout_s=${AT_TRACE_TIMEOUT:-12s}
-  timeout "$timeout_s" \
-    env WINEPREFIX="$PREFIX" WINEDEBUG=+server,+msg,+win,+loaddll "$WINE_BIN" "$PWD/native/AtMsg/AtMsg.exe" "$@" 2>&1 |
-    rg -i 'send_inter_thread_message|retrieve_reply|RegisterWindowMessageW|AtMsg arg0|AtMsg sent|AtMsg wp|AtMsg lp|AtMsg ret|trace:msg|trace:server|ATOK|msg c0'
-}
-
-trace_target_app() {
-  ensure_layout
-  kill_existing_target
-  bash "$HERE/build-at-target.sh"
-  local timeout_s=${AT_TRACE_TIMEOUT:-10s}
-  timeout "$timeout_s" \
-    env WINEPREFIX="$PREFIX" WINEDEBUG=+server,+msg,+win,+loaddll "$WINE_BIN" "$PWD/native/AtTarget/AtTarget.exe" "$@" 2>&1 |
-    rg -i 'create_(mutex|event|named_pipe|file_mapping|private_namespace)|open_(mutex|event|named_pipe|file_mapping|private_namespace)|create_window|register_class|find_window|send_message|post_message|peek_message|get_message|setwindowtheme|setwindowlong|setwindowpos|ATOK|JSFLT|ATFSVR|msctf|tip|LangBarUI|InputConvert|Reconversion|SearchCandidateProvider|DocumentFeed|Composition|WM_IME|WM_KEY'
 }
 
 register_tip() {
@@ -514,10 +445,6 @@ scan_tip_registry() {
   } >"$reg_dump" 2>&1 || true
 
   rg -i 'ATOK|TIP|TextService|msctf|InputConvert|SearchCandidateProvider|Reconversion|LangBarUI|Wow6432Node|1314EB53-CACA-4152-A556-A184143202AF' "$reg_dump" || true
-}
-
-trace_target() {
-  exec "$WRAPPER" trace "$@"
 }
 
 main() {
@@ -591,23 +518,8 @@ main() {
     tipsnapshot)
       run_tipload_snapshot
       ;;
-    shmdump)
-      run_shmdump "$@"
-      ;;
-    target)
-      run_target "$@"
-      ;;
     ctl)
       run_ctl "$@"
-      ;;
-    traceapp)
-      trace_target_app "$@"
-      ;;
-    msg)
-      send_msg "$@"
-      ;;
-    msgtrace)
-      trace_msg "$@"
       ;;
     shell)
       exec "$WRAPPER" shell "$@"
@@ -617,87 +529,6 @@ main() {
       ;;
     scan)
       scan_tip_registry
-      ;;
-    trace)
-      if [[ $# -eq 0 ]]; then
-        trace_target "$DEFAULT_EXE"
-      fi
-      case "${1:-}" in
-        mn|main)
-          shift
-          trace_target ATOK31MN.EXE "$@"
-          ;;
-        fs|server)
-          shift
-          trace_target ATFSVR31.EXE "$@"
-          ;;
-        flt|filter)
-          shift
-          trace_target JSFLT.exe Regserver "$@"
-          ;;
-        *)
-          trace_target "$@"
-          ;;
-      esac
-      ;;
-    traceall)
-      exec "$WRAPPER" traceall
-      ;;
-    traceibdv)
-      exec "$WRAPPER" traceibdv
-      ;;
-    traceallcmp)
-      exec "$WRAPPER" traceallcmp
-      ;;
-    traceallobj)
-      exec "$WRAPPER" traceallobj
-      ;;
-    traceallnames)
-      exec "$WRAPPER" traceallnames
-      ;;
-    tracealldelta)
-      exec "$WRAPPER" tracealldelta
-      ;;
-    tracejsflt)
-      exec "$WRAPPER" tracejsflt
-      ;;
-    tracejsfltboot)
-      exec "$WRAPPER" tracejsfltboot
-      ;;
-    tracejsfltraw)
-      exec "$WRAPPER" tracejsfltraw
-      ;;
-    tracejsfltdiff)
-      exec "$WRAPPER" tracejsfltdiff
-      ;;
-    tracejsfltcmp)
-      exec "$WRAPPER" tracejsfltcmp
-      ;;
-    ipc)
-      if [[ $# -eq 0 ]]; then
-        exec "$WRAPPER" traceipc "$DEFAULT_EXE"
-      fi
-      case "${1:-}" in
-        mn|main)
-          shift
-          exec "$WRAPPER" traceipc ATOK31MN.EXE "$@"
-          ;;
-        fs|server)
-          shift
-          exec "$WRAPPER" traceipc ATFSVR31.EXE "$@"
-          ;;
-        flt|filter)
-          shift
-          exec "$WRAPPER" traceipc JSFLT.exe Regserver "$@"
-          ;;
-        all)
-          shift
-          exec "$WRAPPER" traceall "$@"
-          ;;
-        *)
-          exec "$WRAPPER" traceipc "$@"
-          ;;
-      esac
       ;;
     setup)
       exec "$WRAPPER" setup
