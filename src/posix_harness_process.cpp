@@ -23,8 +23,8 @@ namespace atzc {
 namespace {
 
 std::string base_env(int type_delay_ms) {
-  // Warm-reuse + fast-path flags for the engine; headless and quiet.
-  std::string env = "env -u DISPLAY WINEDEBUG=-all"
+  // Warm-reuse + fast-path flags for the engine; headless (private Xvfb) and quiet.
+  std::string env = "env AT_HEADLESS=1 WINEDEBUG=-all"
                     " AT_RECONV_KEEPALIVE=1 AT_FAST_KEYS=1 AT_PUMP_MS=0 AT_QUIET=1";
   env += " AT_TYPE_DELAY_MS=" +
          std::to_string(type_delay_ms > 0 ? type_delay_ms : 0);
@@ -38,7 +38,7 @@ std::string serve_cmd(const std::string &dir, int type_delay_ms) {
 
 std::string up_cmd(const std::string &dir) {
   return "cd '" + dir +
-         "' && env -u DISPLAY WINEDEBUG=-all ./scripts/at.sh daemon-up";
+         "' && env AT_HEADLESS=1 WINEDEBUG=-all ./scripts/at.sh daemon-up";
 }
 
 class PosixHarnessProcess : public HarnessProcess {

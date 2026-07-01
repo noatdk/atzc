@@ -19,6 +19,8 @@ PREFIX=${AT_WINEPREFIX:-"$PWD/.wine-atok-local"}
 AT_WINE_PIN=""
 # shellcheck source=scripts/wine-pin.sh
 source "$HERE/wine-pin.sh"
+# shellcheck source=scripts/wine-headless.sh
+source "$HERE/wine-headless.sh"
 at_resolve_wine_pin "$AT_HOME/wine"
 if [[ -n "${AT_WINE:-}" ]]; then WINE_BIN=$AT_WINE; WINESERVER_BIN=wineserver
 elif [[ -n "$AT_WINE_PIN" ]]; then WINE_BIN="$AT_WINE_PIN/bin/wine"; WINESERVER_BIN="$AT_WINE_PIN/bin/wineserver"
@@ -79,6 +81,14 @@ wine_env() {
 }
 
 run_wine() {
+  if [[ "${AT_HEADLESS:-0}" == 1 ]]; then
+    at_headless_ensure_display || return 1
+    if [[ "${AT_HEADLESS_GFX_APPLIED:-}" != 1 ]]; then
+      wine_env "$WINE_BIN" reg.exe add 'HKCU\Software\Wine\Drivers' /v Graphics \
+        /t REG_SZ /d "$(at_headless_graphics_driver)" /f >/dev/null 2>&1 || true
+      export AT_HEADLESS_GFX_APPLIED=1
+    fi
+  fi
   # The MsctfShim is installed into the prefix as msctf.dll (with the real Wine
   # msctf renamed to msctf-helper.dll) and the prefix carries a registry
   # DllOverride of msctf=native,builtin. But when WINEDLLOVERRIDES is set in the
@@ -141,6 +151,7 @@ kill_existing_tipruntime() {
   # barely activates). A full wineserver reset guarantees a single fresh
   # constellation per run; prepare_orchestrated_servers restarts it cleanly.
   wine_env "$WINESERVER_BIN" -k >/dev/null 2>&1 || true
+  at_headless_teardown 2>/dev/null || true
   sleep 1
 }
 
@@ -217,7 +228,9 @@ prepare_orchestrated_servers() {
     run_wine reg add 'HKCU\Software\Justsystem\Common' /v UserName /t REG_SZ /d "$atok_user" /f >/dev/null 2>&1 || true
   fi
 
-  if ! xdpyinfo -display ":0" >/dev/null 2>&1; then
+  if [[ "${AT_HEADLESS:-0}" == 1 ]]; then
+    at_headless_ensure_display
+  elif ! xdpyinfo -display ":0" >/dev/null 2>&1; then
     atok-gui >/dev/null 2>&1 || true
   fi
 
@@ -334,6 +347,7 @@ run_tipload_runtime() {
 #                after the conversion. Run per request.
 run_daemon_up() {
   {
+    export AT_HEADLESS=1
     "$WRAPPER" setup
     kill_existing_tipruntime
     build_runtime_components
@@ -342,6 +356,7 @@ run_daemon_up() {
   } 1>&2
 }
 run_daemon_once() {
+  export AT_HEADLESS=1
   ensure_layout 1>&2
   ensure_msctf_shim_linked 1>&2
   AT_TIPLOAD_DAEMON=1 AT_SKIP_BUILD=1 run_wine "$PWD/native/AtTipLoad/AtTipLoad.exe"

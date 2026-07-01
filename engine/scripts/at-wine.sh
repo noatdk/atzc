@@ -13,6 +13,8 @@ PREFIX=${AT_WINEPREFIX:-"$PWD/.wine-atok-local"}
 AT_WINE_PIN=""
 # shellcheck source=scripts/wine-pin.sh
 source "$SCRIPT_DIR/wine-pin.sh"
+# shellcheck source=scripts/wine-headless.sh
+source "$SCRIPT_DIR/wine-headless.sh"
 at_resolve_wine_pin "$AT_HOME/wine"
 if [[ -n "${AT_WINE:-}" ]]; then WINE_BIN=$AT_WINE
 elif [[ -n "$AT_WINE_PIN" ]]; then WINE_BIN="$AT_WINE_PIN/bin/wine"
@@ -74,6 +76,14 @@ wine_env() {
 }
 
 run_wine() {
+  if [[ "${AT_HEADLESS:-0}" == 1 ]]; then
+    at_headless_ensure_display || return 1
+    if [[ "${AT_HEADLESS_GFX_APPLIED:-}" != 1 ]]; then
+      wine_env "$WINE_BIN" reg.exe add 'HKCU\Software\Wine\Drivers' /v Graphics \
+        /t REG_SZ /d "$(at_headless_graphics_driver)" /f >/dev/null 2>&1 || true
+      export AT_HEADLESS_GFX_APPLIED=1
+    fi
+  fi
   wine_env "$WINE_BIN" "$@"
 }
 
@@ -355,7 +365,7 @@ import_registry() {
   if [[ -f "$STUB_ATOK_NSSHIM" ]]; then
     appinit_dlls+=' C:\\windows\\system32\\AtNsShim.dll'
   fi
-  run_wine reg.exe add 'HKCU\Software\Wine\Drivers' /v Graphics /t REG_SZ /d x11 /f >/dev/null 2>&1 || true
+  run_wine reg.exe add 'HKCU\Software\Wine\Drivers' /v Graphics /t REG_SZ /d "$(at_headless_graphics_driver)" /f >/dev/null 2>&1 || true
   for hive in 'HKCU\Software\Wine\DllOverrides' 'HKLM\Software\Wine\DllOverrides'; do
     run_wine reg.exe add "$hive" /v msctf /t REG_SZ /d native,builtin /f >/dev/null 2>&1 || true
     run_wine reg.exe add "$hive" /v msctfp /t REG_SZ /d native,builtin /f >/dev/null 2>&1 || true
