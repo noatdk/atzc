@@ -80,10 +80,24 @@ bool HarnessEngine::readBlock(ConvertResult *out, std::string *err) {
       if (!line.empty() && line.back() == '\r') line.pop_back();
       if (line.rfind("ATD ", 0) != 0) continue;
       std::string rest = line.substr(4);
-      if (rest == "BEGIN") { out->commit.clear(); out->candidates.clear(); }
+      if (rest == "BEGIN") {
+        out->commit.clear();
+        out->candidates.clear();
+        out->candidatesEx.clear();
+      }
       else if (rest == "END") return true;
       else if (rest.rfind("COMMIT ", 0) == 0) out->commit = rest.substr(7);
       else if (rest.rfind("CAND ", 0) == 0) out->candidates.push_back(rest.substr(5));
+      // ATD CANDX <surface>\t<reading-hiragana>\t<hinsi> — the enriched entry.
+      // Cleaner and wider than the flat CAND list; carries reading + 品詞.
+      else if (rest.rfind("CANDX ", 0) == 0) {
+        auto fields = split_tabs(rest.substr(6));
+        Candidate c;
+        c.surface = fields.size() > 0 ? fields[0] : "";
+        c.reading = fields.size() > 1 ? fields[1] : "";
+        c.hinsi = fields.size() > 2 ? fields[2] : "";
+        if (!c.surface.empty()) out->candidatesEx.push_back(std::move(c));
+      }
     }
     std::string rerr;
     int n = proc_->read(&rbuf_, 1000, &rerr);
@@ -109,15 +123,21 @@ bool HarnessEngine::runCmd(const std::string &cmd, ConvertResult *out,
 
 bool HarnessEngine::topOne(const std::string &romaji, ConvertResult *out,
                            std::string *err) {
-  // `henkan` emits only ATD COMMIT (the top-1); candidates stays empty.
+  // `henkan` emits ATD COMMIT (the top-1) plus, now, the forward-henkan
+  // ATD CANDX enriched list (the full list, best for barren readings). The flat
+  // `candidates` typically stays empty on this path.
   return runCmd("henkan " + romaji + "\n", out, err);
 }
 
 bool HarnessEngine::convert(const std::string &romaji, int max,
                             ConvertResult *out, std::string *err) {
   if (!runCmd("convert " + romaji + "\n", out, err)) return false;
-  if (max > 0 && static_cast<int>(out->candidates.size()) > max)
-    out->candidates.resize(max);
+  if (max > 0) {
+    if (static_cast<int>(out->candidates.size()) > max)
+      out->candidates.resize(max);
+    if (static_cast<int>(out->candidatesEx.size()) > max)
+      out->candidatesEx.resize(max);
+  }
   return true;
 }
 

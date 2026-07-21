@@ -22,6 +22,7 @@
 #include "atzc/harness_engine.h"
 #include "atzc/proto.h"
 #include "atzc/session.h"
+#include "atzc/session_engine.h"
 
 namespace {
 
@@ -63,30 +64,55 @@ bool write_all(int fd, const std::string &s) {
   return true;
 }
 
-// Handle one client connection: serve requests until it closes.
+// Reply "ok" plus one optional payload field (empty payload -> bare "ok").
+bool reply_ok1(int cfd, const std::string &payload) {
+  return write_all(cfd, payload.empty()
+                            ? std::string("ok\n")
+                            : atzc::join_tabs({"ok", payload}));
+}
+
+// Handle one client connection: serve requests until it closes. Two protocol
+// families share the connection (see docs/protocol.md):
 //
-//   convert\t<romaji>              -> ok\t<top-1>            (fast; prefetches list)
-//   candidates\t<romaji>[\t<max>]  -> ok\t<top-1>\t<cand>...  (full list, usually cached)
-//   ping                           -> pong
-void serve_conn(int cfd, atzc::Session &session) {
+//   BATCH (stateless, whole-romaji per request; candidate list client-side):
+//     convert\t<romaji>              -> ok\t<top-1>            (fast; prefetches list)
+//     candidates\t<romaji>[\t<max>]  -> ok\t<top-1>\t<cand>...  (flat surfaces)
+//     candidates-ex\t<romaji>[\t<max>] -> okx\t<top-1>\t<surf>\t<reading>\t<hinsi>...
+//                                       (enriched: reading + 品詞 per candidate)
+//     ping                           -> pong
+//
+//   SESSION (stateful, one long-lived composition on the keepalive harness):
+//     session-begin                  -> ok                      (start/reset a comp)
+//     key\t<ascii>                   -> ok\t<kana>               (append romaji)
+//     backspace                      -> ok\t<kana>               (delete one kana)
+//     convert-session                -> ok\t<kanji>              (henkan in place)
+//     preedit                        -> ok\t<text>               (read the preedit)
+//     commit                         -> commit\t<text>           (finalize)
+//     cancel                         -> ok                       (abandon)
+//     session-candidates\t<romaji>[\t<max>] -> ok\t<top-1>\t<cand>...  (heavy list;
+//                                       served by the BATCH single-shot mechanism)
+void serve_conn(int cfd, atzc::Session &session, atzc::SessionEngine &sess) {
   std::string buf, line;
   while (read_line(cfd, &buf, &line)) {
     auto f = atzc::split_tabs(line);
     if (f.empty() || f[0].empty()) continue;
+    const std::string &op = f[0];
 
-    if (f[0] == "ping") {
+    if (op == "ping") {
       if (!write_all(cfd, "pong\n")) break;
       continue;
     }
-    if (f[0] == "convert" || f[0] == "candidates") {
+
+    // --- batch path (unchanged) ---
+    if (op == "convert" || op == "candidates") {
       if (f.size() < 2) {
-        write_all(cfd, atzc::join_tabs({"err", f[0] + ": missing romaji"}));
+        write_all(cfd, atzc::join_tabs({"err", op + ": missing romaji"}));
         continue;
       }
       atzc::ConvertResult r;
       std::string err;
       bool ok;
-      if (f[0] == "convert") {
+      if (op == "convert") {
         ok = session.top1(f[1], &r, &err);  // fast top-1; list prefetched
       } else {
         int max = f.size() > 2 ? std::atoi(f[2].c_str()) : 0;
@@ -101,7 +127,98 @@ void serve_conn(int cfd, atzc::Session &session) {
       if (!write_all(cfd, atzc::join_tabs(reply))) break;
       continue;
     }
-    if (!write_all(cfd, atzc::join_tabs({"err", "unknown op: " + f[0]}))) break;
+
+    // Enriched batch list: prefer candidatesEx (surface/reading/hinsi triples);
+    // if the engine gave none, fall back to the flat surfaces (empty reading/
+    // hinsi) so a caller always gets a usable list.
+    if (op == "candidates-ex") {
+      if (f.size() < 2) {
+        write_all(cfd, atzc::join_tabs({"err", "candidates-ex: missing romaji"}));
+        continue;
+      }
+      atzc::ConvertResult r;
+      std::string err;
+      int max = f.size() > 2 ? std::atoi(f[2].c_str()) : 0;
+      if (!session.candidates(f[1], max, &r, &err)) {
+        if (!write_all(cfd, atzc::join_tabs({"err", err}))) break;
+        continue;
+      }
+      std::vector<std::string> reply{"okx", r.commit};
+      if (!r.candidatesEx.empty()) {
+        for (const auto &c : r.candidatesEx) {
+          reply.push_back(c.surface);
+          reply.push_back(c.reading);
+          reply.push_back(c.hinsi);
+        }
+      } else {
+        for (const auto &c : r.candidates) {  // flat fallback: empty reading/hinsi
+          reply.push_back(c);
+          reply.push_back("");
+          reply.push_back("");
+        }
+      }
+      if (!write_all(cfd, atzc::join_tabs(reply))) break;
+      continue;
+    }
+
+    // --- session path: stateful composition on the keepalive harness ---
+    // The heavy full-candidate-list stays on the batch single-shot mechanism.
+    if (op == "session-candidates") {
+      if (f.size() < 2) {
+        write_all(cfd, atzc::join_tabs({"err", "session-candidates: missing romaji"}));
+        continue;
+      }
+      atzc::ConvertResult r;
+      std::string err;
+      int max = f.size() > 2 ? std::atoi(f[2].c_str()) : 0;
+      if (!session.candidates(f[1], max, &r, &err)) {
+        if (!write_all(cfd, atzc::join_tabs({"err", err}))) break;
+        continue;
+      }
+      std::vector<std::string> reply{"ok", r.commit};
+      for (auto &c : r.candidates) reply.push_back(c);
+      if (!write_all(cfd, atzc::join_tabs(reply))) break;
+      continue;
+    }
+
+    std::string err, text;
+    bool ok = false, handled = true;
+    if (op == "session-begin") {
+      ok = sess.begin(&text, &err);
+    } else if (op == "key") {
+      if (f.size() < 2) {
+        if (!write_all(cfd, atzc::join_tabs({"err", "key: missing chars"}))) break;
+        continue;
+      }
+      ok = sess.type(f[1], &text, &err);
+    } else if (op == "backspace") {
+      ok = sess.backspace(&text, &err);
+    } else if (op == "convert-session") {
+      ok = sess.convert(&text, &err);
+    } else if (op == "preedit") {
+      ok = sess.preedit(&text, &err);
+    } else if (op == "commit") {
+      ok = sess.commit(&text, &err);
+      if (ok) {  // commit uses its own reply verb so the client can tell it apart
+        if (!write_all(cfd, atzc::join_tabs({"commit", text}))) break;
+        continue;
+      }
+    } else if (op == "cancel") {
+      ok = sess.cancel(&err);
+      text.clear();
+    } else {
+      handled = false;
+    }
+    if (handled) {
+      if (!ok) {
+        if (!write_all(cfd, atzc::join_tabs({"err", err}))) break;
+        continue;
+      }
+      if (!reply_ok1(cfd, text)) break;
+      continue;
+    }
+
+    if (!write_all(cfd, atzc::join_tabs({"err", "unknown op: " + op}))) break;
   }
   ::close(cfd);
 }
@@ -163,6 +280,12 @@ int main(int argc, char **argv) {
   std::fprintf(stderr, "atzcd: engine ready\n");
   atzc::Session session(&engine);
 
+  // Stateful-session backend: a second, long-lived keepalive harness for the
+  // typing/henkan/commit composition path. It shares the already-warm servers
+  // brought up above, so it needs no bringUp() here — it warms its worker
+  // lazily on the first session request (keeps cold-start latency to one warm).
+  atzc::SessionEngine sess(atzc::MakeSessionHarnessProcess(engine_dir));
+
   int lfd = ::socket(AF_UNIX, SOCK_STREAM, 0);
   if (lfd < 0) {
     std::perror("atzcd: socket");
@@ -195,7 +318,7 @@ int main(int argc, char **argv) {
       std::perror("atzcd: accept");
       break;
     }
-    serve_conn(cfd, session);
+    serve_conn(cfd, session, sess);
   }
 
   cleanup_and_exit(0);

@@ -7,6 +7,8 @@
 
 #include "atzc/harness_process.h"
 
+#include "atzc/session_engine.h"
+
 #include <poll.h>
 #include <signal.h>
 #include <spawn.h>
@@ -31,9 +33,10 @@ std::string base_env(int type_delay_ms) {
   return env;
 }
 
-std::string serve_cmd(const std::string &dir, int type_delay_ms) {
+std::string serve_cmd(const std::string &dir, int type_delay_ms,
+                      const std::string &subcmd) {
   return "cd '" + dir + "' && " + base_env(type_delay_ms) +
-         " ./scripts/at.sh daemon-once";
+         " ./scripts/at.sh " + subcmd;
 }
 
 std::string up_cmd(const std::string &dir) {
@@ -43,8 +46,14 @@ std::string up_cmd(const std::string &dir) {
 
 class PosixHarnessProcess : public HarnessProcess {
  public:
-  PosixHarnessProcess(std::string engine_dir, int type_delay_ms)
-      : engine_dir_(std::move(engine_dir)), type_delay_ms_(type_delay_ms) {}
+  // `serve_subcmd` selects the launcher mode: "daemon-once" (batch, single-shot
+  // per request — the default) or "daemon-session" (keepalive, one long-lived
+  // composition speaking the s* commands).
+  PosixHarnessProcess(std::string engine_dir, int type_delay_ms,
+                      std::string serve_subcmd)
+      : engine_dir_(std::move(engine_dir)),
+        type_delay_ms_(type_delay_ms),
+        serve_subcmd_(std::move(serve_subcmd)) {}
   ~PosixHarnessProcess() override { terminate(); }
 
   bool bringUp(std::string *err) override {
@@ -64,7 +73,7 @@ class PosixHarnessProcess : public HarnessProcess {
       if (err) *err = std::string("pipe: ") + std::strerror(errno);
       return false;
     }
-    std::string sh = serve_cmd(engine_dir_, type_delay_ms_);
+    std::string sh = serve_cmd(engine_dir_, type_delay_ms_, serve_subcmd_);
     const char *argv[] = {"bash", "-lc", sh.c_str(), nullptr};
 
     posix_spawn_file_actions_t fa;
@@ -171,6 +180,7 @@ class PosixHarnessProcess : public HarnessProcess {
 
   std::string engine_dir_;
   int type_delay_ms_;
+  std::string serve_subcmd_;
   pid_t pid_ = -1;   // warm worker pid (-1 = none)
   int in_fd_ = -1;   // -> worker stdin
   int out_fd_ = -1;  // <- worker stdout
@@ -181,7 +191,16 @@ class PosixHarnessProcess : public HarnessProcess {
 std::unique_ptr<HarnessProcess> MakeHarnessProcess(std::string engine_dir,
                                                    int type_delay_ms) {
   return std::make_unique<PosixHarnessProcess>(std::move(engine_dir),
-                                               type_delay_ms);
+                                               type_delay_ms, "daemon-once");
+}
+
+std::unique_ptr<HarnessProcess> MakeSessionHarnessProcess(
+    std::string engine_dir) {
+  // The session harness types keystroke-by-keystroke over the wire; the engine's
+  // own AT_TYPE_DELAY_MS is left at 0 (no artificial per-key delay).
+  return std::make_unique<PosixHarnessProcess>(std::move(engine_dir),
+                                               /*type_delay_ms=*/0,
+                                               "daemon-session");
 }
 
 }  // namespace atzc

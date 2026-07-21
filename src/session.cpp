@@ -1,14 +1,18 @@
 #include "atzc/session.h"
 
 #include <chrono>
+#include <unordered_set>
 
 #include "atzc/engine.h"
 
 namespace atzc {
 namespace {
 void cap(ConvertResult *r, int max) {
-  if (max > 0 && static_cast<int>(r->candidates.size()) > max)
+  if (max <= 0) return;
+  if (static_cast<int>(r->candidates.size()) > max)
     r->candidates.resize(static_cast<size_t>(max));
+  if (static_cast<int>(r->candidatesEx.size()) > max)
+    r->candidatesEx.resize(static_cast<size_t>(max));
 }
 }  // namespace
 
@@ -68,22 +72,39 @@ std::string Session::takeTop1(const std::string &romaji) {
 // Must be called holding engine_mu_. Lead the list with the top-1 (from a prior
 // top1(), or computed now) so the candidate window matches the inline conversion;
 // the full-list results follow as the alternatives (deduped).
+//
+// Two enriched lists are available and complementary: the forward-henkan CANDX
+// (from topOne — the full list, best for barren readings) and the reconversion
+// CANDX (from convert — recovers words a polluted henkan top-1 suppresses). We
+// union them, deduped by surface, henkan first, so candidatesEx is maximal. The
+// flat `candidates` list keeps its prior behavior (reconversion surfaces led by
+// the top-1) for flat-surface consumers.
 bool Session::buildCandidates(const std::string &romaji, ConvertResult *out,
                               std::string *err) {
   std::string t1 = takeTop1(romaji);
-  if (t1.empty()) {
-    ConvertResult tr;
+  // Always fetch the henkan result: it yields the forward-henkan CANDX (the full
+  // enriched list). Reuse a remembered top-1 for the commit if we have one.
+  ConvertResult hres;
+  {
     std::string e;
-    if (engine_->topOne(romaji, &tr, &e)) t1 = tr.commit;  // no prior convert
+    if (engine_->topOne(romaji, &hres, &e) && t1.empty()) t1 = hres.commit;
   }
   ConvertResult rlist;
   if (!engine_->convert(romaji, 0, &rlist, err)) return false;
 
   out->candidates.clear();
+  out->candidatesEx.clear();
   out->commit = !t1.empty() ? t1 : rlist.commit;
   if (!out->commit.empty()) out->candidates.push_back(out->commit);
   for (const auto &c : rlist.candidates)
     if (c != out->commit) out->candidates.push_back(c);
+
+  // Enriched union: henkan CANDX first (fullest), then reconversion CANDX,
+  // deduped by surface (the reconversion path recovers surfaces henkan misses).
+  std::unordered_set<std::string> seen;
+  for (const auto *src : {&hres.candidatesEx, &rlist.candidatesEx})
+    for (const auto &c : *src)
+      if (seen.insert(c.surface).second) out->candidatesEx.push_back(c);
   return true;
 }
 

@@ -18,6 +18,7 @@ find_package(Threads REQUIRED)
 # daemon (Linux) or linked directly in-process (e.g. modore on Windows).
 add_library(atzc-core STATIC
   src/session.cpp
+  src/session_engine.cpp
   src/harness_engine.cpp
   src/posix_harness_process.cpp
   src/local_converter.cpp)
@@ -59,4 +60,19 @@ if(BUILD_FCITX5)
   else()
     message(STATUS "Fcitx5Core not found — skipping fcitx5 addon (install fcitx5 dev packages to enable)")
   endif()
+endif()
+
+# Dry-run tests — off by default (no engine needed; drive a mock harness).
+option(BUILD_TESTS "Build the dry-run unit tests" OFF)
+if(BUILD_TESTS)
+  enable_testing()
+  add_executable(session_engine_test tests/session_engine_test.cpp)
+  target_link_libraries(session_engine_test PRIVATE atzc-core)
+  target_include_directories(session_engine_test PRIVATE include)
+  add_test(NAME session_engine_test COMMAND session_engine_test)
+
+  add_executable(harness_candx_test tests/harness_candx_test.cpp)
+  target_link_libraries(harness_candx_test PRIVATE atzc-core)
+  target_include_directories(harness_candx_test PRIVATE include)
+  add_test(NAME harness_candx_test COMMAND harness_candx_test)
 endif()

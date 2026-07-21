@@ -59,6 +59,9 @@ Short commands:
                      (no TIP). For ../atzc-server. Run once.
   daemon-once        One conversion via a fresh single-shot TIP against warm
                      servers (ATD line protocol on stdin/stdout). Per request.
+  daemon-session     Long-lived keepalive TIP holding one composition; speaks
+                     the session line protocol (sreset/stype/sback/sconv/spre/
+                     scommit -> ATD PRE / ATD COMMIT). For ../atzc-server.
   drive <commands>   Send ;-separated runtime commands to the resident tipruntime
                      and print the new tipruntime.log lines (fast inner loop;
                      e.g. drive "reset; type kisha; reading; reconv"). No rebuild.
@@ -345,6 +348,11 @@ run_tipload_runtime() {
 #                already-warm servers (no rebuild, no server restart). Speaks the
 #                ATD line protocol on stdin/stdout; exits (or faults in teardown)
 #                after the conversion. Run per request.
+#   daemon-session  a long-lived AT_TIPLOAD_DAEMON/AT_SESSION harness holding one
+#                composition; speaks the session line protocol
+#                (sreset/stype/sback/sconv/spre/scommit -> ATD PRE / ATD COMMIT)
+#                for typing/henkan/commit. The heavy full-list still uses
+#                daemon-once (teardown constraint). Run once, drive per keystroke.
 run_daemon_up() {
   {
     export AT_HEADLESS=1
@@ -360,6 +368,21 @@ run_daemon_once() {
   ensure_layout 1>&2
   ensure_msctf_shim_linked 1>&2
   AT_TIPLOAD_DAEMON=1 AT_SKIP_BUILD=1 run_wine "$PWD/native/AtTipLoad/AtTipLoad.exe"
+}
+run_daemon_session() {
+  # Keepalive session harness: one long-lived AT_TIPLOAD_DAEMON TIP against the
+  # already-warm servers, holding a single composition across the whole session.
+  # Prints `ATD READY`, then speaks the session line protocol on stdin/stdout
+  # (sreset/scancel/stype/sback/sconv/spre/scommit -> ATD PRE / ATD COMMIT). The
+  # warm-reuse / fast-key env (AT_RECONV_KEEPALIVE/AT_FAST_KEYS/AT_PUMP_MS/
+  # AT_TYPE_DELAY_MS) is supplied by the caller's environment. Per request the
+  # heavy full-candidate list still goes through daemon-once.
+  #
+  # Same launcher as daemon-once, plus AT_SESSION=1 to select the resident
+  # session mode; reuses run_daemon_once so the launch invocation is not
+  # duplicated.
+  export AT_SESSION=1
+  run_daemon_once
 }
 
 # Send one or more `;`-separated runtime commands to the resident tipruntime and
@@ -505,6 +528,9 @@ main() {
       ;;
     daemon-once)
       run_daemon_once
+      ;;
+    daemon-session)
+      run_daemon_session
       ;;
     drive)
       drive_runtime "$@"

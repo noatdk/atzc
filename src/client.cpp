@@ -113,6 +113,7 @@ bool Client::request(const char *op, const std::string &romaji, int max,
   }
   out->commit = f.size() > 1 ? f[1] : "";
   out->candidates.assign(f.begin() + (f.size() > 1 ? 2 : 1), f.end());
+  out->candidatesEx.clear();
   return true;
 }
 
@@ -126,6 +127,45 @@ bool Client::candidates(const std::string &romaji, int max, ConvertResult *out,
   return request("candidates", romaji, max, out, err);
 }
 
+bool Client::candidatesEx(const std::string &romaji, int max,
+                          ConvertResult *out, std::string *err) {
+  if (fd_ < 0 && !connect(err)) return false;
+  std::vector<std::string> req{"candidates-ex", romaji};
+  if (max > 0) req.push_back(std::to_string(max));
+  if (!send_line(join_tabs(req), err)) return false;
+
+  std::string line;
+  if (!recv_line(&line, err)) return false;
+  auto f = split_tabs(line);
+  if (f.empty()) {
+    if (err) *err = "empty reply";
+    return false;
+  }
+  if (f[0] == "err") {
+    if (err) *err = f.size() > 1 ? f[1] : "engine error";
+    return false;
+  }
+  if (f[0] != "okx") {
+    if (err) *err = "unexpected reply: " + f[0];
+    return false;
+  }
+  out->commit = f.size() > 1 ? f[1] : "";
+  out->candidates.clear();
+  out->candidatesEx.clear();
+  // After the commit field, candidates arrive as (surface, reading, hinsi)
+  // triples. Tolerate a short trailing group (pad missing fields with empty).
+  for (size_t i = 2; i < f.size(); i += 3) {
+    Candidate c;
+    c.surface = f[i];
+    c.reading = i + 1 < f.size() ? f[i + 1] : "";
+    c.hinsi = i + 2 < f.size() ? f[i + 2] : "";
+    if (c.surface.empty()) continue;
+    out->candidates.push_back(c.surface);  // keep the flat view populated too
+    out->candidatesEx.push_back(std::move(c));
+  }
+  return true;
+}
+
 bool Client::ping(std::string *err) {
   if (fd_ < 0 && !connect(err)) return false;
   if (!send_line(join_tabs({"ping"}), err)) return false;
@@ -136,6 +176,67 @@ bool Client::ping(std::string *err) {
     return false;
   }
   return true;
+}
+
+bool Client::simpleReq(const std::string &op, const std::string *arg,
+                       const char *expect_verb, std::string *text,
+                       std::string *err) {
+  if (fd_ < 0 && !connect(err)) return false;
+  std::vector<std::string> req{op};
+  if (arg) req.push_back(*arg);
+  if (!send_line(join_tabs(req), err)) return false;
+
+  std::string line;
+  if (!recv_line(&line, err)) return false;
+  auto f = split_tabs(line);
+  if (f.empty()) {
+    if (err) *err = "empty reply";
+    return false;
+  }
+  if (f[0] == "err") {
+    if (err) *err = f.size() > 1 ? f[1] : "engine error";
+    return false;
+  }
+  if (f[0] != expect_verb) {
+    if (err) *err = "unexpected reply: " + f[0];
+    return false;
+  }
+  if (text) *text = f.size() > 1 ? f[1] : "";
+  return true;
+}
+
+bool Client::sessionBegin(std::string *preedit, std::string *err) {
+  return simpleReq("session-begin", nullptr, "ok", preedit, err);
+}
+
+bool Client::sessionKey(const std::string &ascii, std::string *preedit,
+                        std::string *err) {
+  return simpleReq("key", &ascii, "ok", preedit, err);
+}
+
+bool Client::sessionBackspace(std::string *preedit, std::string *err) {
+  return simpleReq("backspace", nullptr, "ok", preedit, err);
+}
+
+bool Client::sessionConvert(std::string *preedit, std::string *err) {
+  return simpleReq("convert-session", nullptr, "ok", preedit, err);
+}
+
+bool Client::sessionPreedit(std::string *preedit, std::string *err) {
+  return simpleReq("preedit", nullptr, "ok", preedit, err);
+}
+
+bool Client::sessionCommit(std::string *committed, std::string *err) {
+  return simpleReq("commit", nullptr, "commit", committed, err);
+}
+
+bool Client::sessionCancel(std::string *err) {
+  return simpleReq("cancel", nullptr, "ok", nullptr, err);
+}
+
+bool Client::sessionCandidates(const std::string &romaji, int max,
+                               ConvertResult *out, std::string *err) {
+  return request("session-candidates", romaji, max, out, err);
 }
 
 }  // namespace atzc

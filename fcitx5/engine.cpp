@@ -44,15 +44,46 @@ void AtzcEngine::updatePreedit(fcitx::InputContext *ic, const std::string &s) {
 }
 
 void AtzcEngine::clearSession(fcitx::InputContext *ic) {
-  state(ic)->clear();
+  auto *st = state(ic);
+  // Abandon any live composition on the daemon so its state matches ours.
+  if (st->composing) {
+    std::string err;
+    if (!client_.connected()) client_.connect(&err);
+    client_.sessionCancel(&err);
+  }
+  st->clear();
   ic->inputPanel().reset();
   ic->updatePreedit();
   ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
 }
 
 void AtzcEngine::commit(fcitx::InputContext *ic, const std::string &text) {
+  auto *st = state(ic);
+  // Committing a chosen string bypasses the daemon's own commit; cancel its
+  // live composition first so the next composition starts clean.
+  if (st->composing) {
+    std::string err;
+    if (!client_.connected()) client_.connect(&err);
+    client_.sessionCancel(&err);
+    st->composing = false;
+  }
   ic->commitString(text);
   clearSession(ic);
+}
+
+// Ensure a daemon composition is open (begin() it if not). One reconnect retry;
+// mirrors the reconnect logic the batch path uses.
+bool AtzcEngine::ensureComposing(AtzcState *st, std::string *err) {
+  if (st->composing) return true;
+  if (!client_.connected() && !client_.connect(err)) return false;
+  std::string pre;
+  if (!client_.sessionBegin(&pre, err)) {
+    client_.close();
+    if (!client_.connect(err) || !client_.sessionBegin(&pre, err)) return false;
+  }
+  st->composing = true;
+  st->preedit.clear();
+  return true;
 }
 
 void AtzcEngine::startConversion(fcitx::InputContext *ic) {
@@ -61,15 +92,15 @@ void AtzcEngine::startConversion(fcitx::InputContext *ic) {
 
   ConvertResult r;
   std::string err;
-  // Opening the candidate window needs the full list; candidates() is usually
-  // served from the daemon's prefetch cache. (A future enhancement: call
-  // convert() per keystroke for an inline top-1, which also primes that prefetch.)
+  // Opening the candidate window needs the full list; this is the single-shot
+  // (heavy) path, kept separate from the live session per the teardown
+  // constraint. Usually a prefetch cache hit on the daemon.
   if (!client_.connected()) client_.connect(&err);
-  if (!client_.candidates(st->romaji, 0, &r, &err)) {
-    // One reconnect attempt — atzcd may have restarted.
-    client_.close();
-    if (!client_.connect(&err) || !client_.candidates(st->romaji, 0, &r, &err)) {
-      return;  // leave the romaji preedit as-is so the user can retry
+  if (!client_.sessionCandidates(st->romaji, 0, &r, &err)) {
+    client_.close();  // atzcd may have restarted — one reconnect attempt.
+    if (!client_.connect(&err) ||
+        !client_.sessionCandidates(st->romaji, 0, &r, &err)) {
+      return;  // leave the preedit as-is so the user can retry
     }
   }
   if (r.candidates.empty()) {
@@ -133,41 +164,87 @@ void AtzcEngine::keyEvent(const fcitx::InputMethodEntry &, fcitx::KeyEvent &ev) 
       return ev.filterAndAccept();
     }
     if (key.check(FcitxKey_Escape)) {
-      // Drop the candidate list, keep the romaji for editing.
+      // Drop the candidate list, keep the composition for editing.
       ic->inputPanel().setCandidateList(nullptr);
-      updatePreedit(ic, st->romaji);
+      updatePreedit(ic, st->preedit.empty() ? st->romaji : st->preedit);
       ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
       return ev.filterAndAccept();
     }
   }
 
-  // Building the romaji buffer.
-  if (key.check(FcitxKey_space) && !st->romaji.empty()) {
+  const bool active = !st->romaji.empty() || st->composing;
+
+  // Space: first press henkan-in-place (session convert); if already converted
+  // (candidate window not open but we have a reading), open the candidate list.
+  if (key.check(FcitxKey_space) && active) {
+    std::string err, pre;
+    if (client_.connected() || client_.connect(&err)) {
+      if (client_.sessionConvert(&pre, &err)) {
+        st->preedit = pre;
+        updatePreedit(ic, pre.empty() ? st->romaji : pre);
+        ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+        return ev.filterAndAccept();
+      }
+    }
+    // Session convert unavailable: fall back to the full candidate window.
     startConversion(ic);
     return ev.filterAndAccept();
   }
-  if (key.check(FcitxKey_BackSpace) && !st->romaji.empty()) {
-    st->romaji.pop_back();
+
+  if (key.check(FcitxKey_BackSpace) && active) {
+    if (!st->romaji.empty()) st->romaji.pop_back();
+    std::string err, pre;
+    if ((client_.connected() || client_.connect(&err)) &&
+        client_.sessionBackspace(&pre, &err)) {
+      st->preedit = pre;
+    } else {
+      st->preedit = st->romaji;  // keep local view usable on a daemon miss
+    }
     ic->inputPanel().setCandidateList(nullptr);
-    updatePreedit(ic, st->romaji);
-    ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+    if (st->romaji.empty() && st->preedit.empty()) {
+      clearSession(ic);
+    } else {
+      updatePreedit(ic, st->preedit.empty() ? st->romaji : st->preedit);
+      ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+    }
     return ev.filterAndAccept();
   }
-  if (key.check(FcitxKey_Return) && !st->romaji.empty()) {
-    commit(ic, st->romaji);  // commit raw romaji if the user never converted
+
+  if (key.check(FcitxKey_Return) && active) {
+    std::string err, committed;
+    if ((client_.connected() || client_.connect(&err)) &&
+        client_.sessionCommit(&committed, &err) && !committed.empty()) {
+      st->composing = false;
+      ic->commitString(committed);
+      clearSession(ic);
+    } else {
+      // Daemon miss: commit whatever we are showing.
+      commit(ic, st->preedit.empty() ? st->romaji : st->preedit);
+    }
     return ev.filterAndAccept();
   }
-  if (key.check(FcitxKey_Escape) && !st->romaji.empty()) {
+
+  if (key.check(FcitxKey_Escape) && active) {
     clearSession(ic);
     return ev.filterAndAccept();
   }
-  // a-z (no modifiers) extends the buffer.
+
+  // a-z (no modifiers) extends the composition.
   if (key.isSimple()) {
     auto sym = key.sym();
     if (sym >= FcitxKey_a && sym <= FcitxKey_z) {
+      std::string err;
+      if (!ensureComposing(st, &err)) return;  // daemon down: let the key pass
+      std::string pre;
+      const std::string ch(1, static_cast<char>(sym));
+      if (client_.sessionKey(ch, &pre, &err)) {
+        st->preedit = pre;
+      } else {
+        st->preedit += ch;  // best-effort local echo on a daemon miss
+      }
       st->romaji.push_back(static_cast<char>(sym));
       ic->inputPanel().setCandidateList(nullptr);
-      updatePreedit(ic, st->romaji);
+      updatePreedit(ic, st->preedit.empty() ? st->romaji : st->preedit);
       ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
       return ev.filterAndAccept();
     }

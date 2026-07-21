@@ -5,12 +5,24 @@
 // TSV line needs no escaping and is trivial to produce/parse in C++, Python,
 // or anything else. No JSON dependency.
 //
-//   request   convert <romaji> [max]      -> ok <commit> [cand...]   (commit == cand[0])
+//   batch     convert <romaji> [max]      -> ok <commit> [cand...]   (commit == cand[0])
+//             candidates <romaji> [max]    -> ok <commit> <cand...>
+//             candidates-ex <romaji> [max] -> okx <commit> <surf reading hinsi>...
 //             ping                         -> pong
+//   session   session-begin / key <ascii> / backspace / convert-session /
+//             preedit / cancel             -> ok [<preedit>]
+//             commit                       -> commit <text>
+//             session-candidates <r> [max] -> ok <commit> [cand...]
 //   reply     err <message>               (on any failure)
 //
 // `commit` is the engine's top-1 conversion; the candidate list follows. A
-// reply with `ok` and no candidates means the engine produced nothing.
+// reply with `ok` and no candidates means the engine produced nothing. The
+// session family is a stateful composition; see docs/protocol.md.
+//
+// candidates-ex returns the ENRICHED list (candidatesEx): each candidate is a
+// (surface, reading-hiragana, part-of-speech) triple. It is cleaner and wider
+// than the flat list; `candidates` still works unchanged for flat-surface
+// clients. See docs/protocol.md.
 
 #ifndef ATZC_PROTO_H_
 #define ATZC_PROTO_H_
@@ -20,10 +32,24 @@
 
 namespace atzc {
 
-// Result of a conversion: top-1 plus the full candidate list (commit == [0]).
+// One enriched candidate: the surface form plus its reading (hiragana) and
+// part-of-speech (hinsi — a label like 名詞, or a hex fallback like 0x08).
+struct Candidate {
+  std::string surface;
+  std::string reading;
+  std::string hinsi;
+};
+
+// Result of a conversion: top-1, the flat candidate surface list (commit ==
+// candidates[0]), and — when the engine supplied it — the enriched list. The
+// enriched list is cleaner (no user-dict pollution) and wider (covers readings
+// the flat reconversion list misses); candidatesEx[i].surface need not line up
+// with candidates[i]. candidatesEx is empty when the engine gave no enriched
+// data, in which case consumers fall back to the flat `candidates`.
 struct ConvertResult {
   std::string commit;
   std::vector<std::string> candidates;
+  std::vector<Candidate> candidatesEx;
 };
 
 // Split a line on '\t'. Trailing '\r'/'\n' are ignored by the caller.
